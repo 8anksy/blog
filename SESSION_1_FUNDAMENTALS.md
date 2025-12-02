@@ -30,14 +30,99 @@ The AI cannot infer missing context; it predicts the statistically average respo
 
 Effective prompting requires treating poor outputs as a skill issue rather than an AI limitation. Prompt engineer Daniel Mesler articulates this principle: "If the AI model's response is bad, the problem is me." This perspective is the primary distinction between effective and ineffective prompters.
 
-### Activity 1: The Bad Prompt Comparison (5 minutes)
+### Activity 1: Salesforce Apex Development Demo (5 minutes)
 
-**Demonstration:**
-1. Input: "Write an apology email"
-2. Output: Generic corporate-sounding response
-3. Analysis: The prompt lacks specificity, forcing the AI to predict a statistically average response
+**Live Demo (Runnable in Cursor):**
 
-**Key Concept:** Prompting is not a questioning process; it is pattern setting. Vague patterns require the AI to guess the intended output structure, tone, and content.
+#### Bad Prompt
+
+```
+Create an Apex trigger to handle account updates
+```
+
+**Result:** Generic boilerplate trigger without business logic clarity, error handling, or context-specific requirements.
+
+```apex
+trigger AccountUpdateTrigger on Account (before update, after update) {
+    for (Account acc : Trigger.new) {
+        // Handle account updates
+    }
+}
+```
+
+**Issues:**
+- No trigger context specified (before/after, insert/update/delete)
+- No business logic requirements defined
+- No validation rules explained
+- No integration context or dependencies mentioned
+- Generic placeholder code
+
+#### Good Prompt
+
+```
+Create an Apex trigger that prevents duplicate Account names in the same region.
+Trigger context: before insert, before update
+For before insert: Check if an Account with the same Name and Region__c already exists in the database. Prevent insert with error message: "An Account with this name already exists in this region"
+For before update: Check if another Account (different Id) has the same Name and Region__c. Prevent update with error message: "An Account with this name already exists in this region"
+Use SOQL to query existing accounts.
+Add error to the field Region__c on the Account record being inserted/updated.
+Include inline comments explaining the logic.
+```
+
+**Result:** Specific, testable trigger addressing actual business requirements.
+
+```apex
+trigger AccountDuplicatePreventionTrigger on Account (before insert, before update) {
+    Set<String> namesToCheck = new Set<String>();
+    Set<String> regionsToCheck = new Set<String>();
+
+    for (Account acc : Trigger.new) {
+        namesToCheck.add(acc.Name);
+        if (acc.Region__c != null) {
+            regionsToCheck.add(acc.Region__c);
+        }
+    }
+
+    // Query existing accounts with same names and regions
+    List<Account> existingAccounts = [
+        SELECT Id, Name, Region__c
+        FROM Account
+        WHERE Name IN :namesToCheck
+        AND Region__c IN :regionsToCheck
+    ];
+
+    // Create a map for quick lookup: Name + Region = existing account id
+    Map<String, String> nameRegionMap = new Map<String, String>();
+    for (Account acc : existingAccounts) {
+        String key = acc.Name + '|' + acc.Region__c;
+        nameRegionMap.put(key, acc.Id);
+    }
+
+    for (Account acc : Trigger.new) {
+        String key = acc.Name + '|' + acc.Region__c;
+        String existingId = nameRegionMap.get(key);
+
+        if (Trigger.isInsert && existingId != null) {
+            acc.addError('An Account with this name already exists in this region');
+        } else if (Trigger.isUpdate && existingId != null && existingId != acc.Id) {
+            acc.addError('An Account with this name already exists in this region');
+        }
+    }
+}
+```
+
+**Specification Impact:**
+
+The good prompt provides:
+- Explicit trigger context (before insert, before update)
+- Specific business rule (duplicate name + region check)
+- Error message specification
+- Technical implementation details (SOQL, field target)
+- Expected behavior for both insert and update scenarios
+
+The difference in output quality derives entirely from pattern specificity. Same AI, same capabilities, vastly different results based on instruction clarity.
+
+**Key Concept:** Prompting is not a questioning process; it is pattern setting. Vague patterns require the AI to predict the statistically average Salesforce boilerplate. Specific patterns constrain prediction to align with actual business requirements.
 
 ---
 
@@ -67,19 +152,81 @@ LLM output quality directly correlates with pattern specificity in the prompt:
 
 ### Pattern Recognition and Prediction Accuracy
 
-**Vague Pattern Example:**
+**Vague Salesforce Pattern (Model Goes Off Track):**
 ```
-You need to learn Docker right now
+Create a trigger that validates account data
 ```
-Result: Generic explanation ("Here's why Docker is important...")
 
-**Specific Pattern Example:**
-```
-You need to learn [SKILL] right now or [CONSEQUENCE]
-```
-Result: More accurate completion matching the intended structure
+Result: The model predicts a generic pattern based on common trigger patterns in training data. It might produce validation for industry-standard fields (Name, BillingCity, Phone), but misses your actual business logic:
 
-The model does not "learn" user identity or personality. It recognizes structural patterns and predicts continuations based on similar patterns in training data. Thousands of YouTube creator intros follow comparable structures, allowing the model to predict continuations aligned with the specified pattern.
+```apex
+trigger AccountValidationTrigger on Account (before insert, before update) {
+    for (Account acc : Trigger.new) {
+        if (String.isBlank(acc.Name)) {
+            acc.addError('Account name is required');
+        }
+        if (String.isBlank(acc.BillingCity)) {
+            acc.addError('Billing city is required');
+        }
+        if (String.isBlank(acc.Phone)) {
+            acc.addError('Phone is required');
+        }
+    }
+}
+```
+
+**Issues:** Wrong validation rules. Model predicted generic best-practices, not your business requirements.
+
+**Refined Pattern (Second Prompt - Correcting Course):**
+```
+Update the trigger to validate only these fields specific to our business:
+- Account.Industry must not be null
+- Account.AnnualRevenue must be > 0 if Industry is 'Technology'
+- Account.Website must be populated if Rating is 'Hot'
+Remove validation for Name, BillingCity, and Phone.
+```
+
+Result: Model now recognizes the specific pattern and generates correct validations:
+
+```apex
+trigger AccountValidationTrigger on Account (before insert, before update) {
+    for (Account acc : Trigger.new) {
+        if (acc.Industry == null) {
+            acc.addError('Industry is required');
+        }
+        if (acc.Industry == 'Technology' && acc.AnnualRevenue <= 0) {
+            acc.addError('Annual Revenue must be greater than 0 for Technology companies');
+        }
+        if (acc.Rating == 'Hot' && String.isBlank(acc.Website)) {
+            acc.addError('Website is required for Hot prospects');
+        }
+    }
+}
+```
+
+**Key Teaching Point:** The model does not "understand" your business logic. It recognizes patterns—common validation patterns, typical required fields, standard error messages. When the pattern is vague (validate account data), it predicts the statistically average validation. When you refine the pattern with specific business rules, it corrects course and predicts validations aligned with your actual requirements.
+
+**Iterative Workflow:** This demonstrates the real workflow. You don't always need perfect one-shot prompts. Vague patterns produce off-track results, requiring refinement. Each refinement provides additional pattern constraint, correcting the prediction toward your intended output.
+
+**Diagnostic Analysis - What Went Wrong:**
+
+When the first prompt produced generic validation, the model went astray because:
+
+1. **Missing context:** The prompt didn't specify your business domain constraints (Industry, AnnualRevenue, Rating fields are specific to your org)
+2. **Ambiguous scope:** "Validates account data" matches any validation pattern in training data—the model predicted the most statistically common one (Name, City, Phone)
+3. **No constraint specification:** Without explicit field names and rules, the model had infinite valid interpretations
+
+**Improvement Framework - Diagnostic Questions:**
+
+When a model produces off-track output, use these questions to improve your next prompt:
+
+- **What context did I assume the model had?** (Example: Custom fields like Industry, AnnualRevenue, Rating. The model had no way to know these existed.)
+- **What patterns in training data matched my vague input?** (Generic account validation uses standard fields. That's what the model predicted.)
+- **Where is my prompt ambiguous?** (List: "validates account data" could mean any of 100 things.)
+- **What specific information would eliminate this ambiguity?** (Field names, validation rules, conditional logic.)
+- **What assumptions am I making that aren't explicit?** (Assuming the model knows your custom fields, your business rules, your data model.)
+
+**This is how you improve as a prompter.** Each off-track result is a weakness in your prompt specification, not a weakness in the model. The model worked correctly—it predicted based on the vague pattern you provided. Your job is identifying where the pattern was vague and making it specific.
 
 ### Terminology: "Completions"
 
@@ -117,19 +264,92 @@ This loop transforms Cursor from a simple code completion tool into an iterative
 
 **Key Insight:** Cursor's power derives from embedding the LLM in a feedback loop where predictions must align with real code structure and execution results. Each tool call grounds the prediction pattern in evidence.
 
-### Activity 2: Pattern vs. Question (7 minutes)
+### Activity 2: Identifying Hidden Vagueness (7 minutes)
 
-**Question-Based Prompt:**
+**Exercise: What's Wrong with This Prompt?**
+
+Present this prompt to your team and ask: "What would you change about this prompt to make it more specific?"
+
 ```
-What is Docker?
+Create a robust Apex batch job that validates and analyzes Account data.
+The batch should intelligently process records in an optimized manner.
+Validate all relevant fields for data quality and consistency.
+Analyze account metrics to summarize key insights.
+Handle errors gracefully with comprehensive logging.
+Ensure the batch is scalable and performs well.
+Include best practices throughout the implementation.
 ```
 
-**Pattern-Based Prompt:**
+**Encourage participants to identify:**
+- Which terms are vague?
+- What context is missing?
+- What assumptions is the prompt making?
+- What output would this actually produce?
+
+---
+
+**Answer Key: Hidden Vagueness Breakdown**
+
+| Vague Language | What It Actually Means | What's Missing | Better Specification |
+|---|---|---|---|
+| "robust Apex batch job" | Undefined robustness criteria | What makes it robust? Retry logic? Failure thresholds? | Specify: "Batch handles up to 10,000 records per chunk. Retries failed batches max 3 times. Logs all failures." |
+| "validates...data" | Any validation could apply | Which fields? What rules? Custom field names? | List specific fields: "Validate Industry not null, AnnualRevenue > 0 if Industry='Tech', Website required if Rating='Hot'" |
+| "intelligently process records" | Meaningless abstraction | What intelligence? Sorting? Filtering? Business logic? | Specify: "Process only Accounts modified in last 7 days. Skip records where Status='Inactive'" |
+| "in an optimized manner" | No optimization criteria defined | Optimize for speed? Memory? Batch size? | Specify: "Process 200 records per batch. Use Map<Id, Account> for lookups to avoid repeated queries" |
+| "relevant fields" | Assumes AI knows your schema | Which custom fields? Standard fields? | List explicitly: "Field names: Name, Industry, AnnualRevenue, Website, Region__c, Rating" |
+| "key insights" | Too abstract | What metrics? What insights? Numbers? Percentages? | Specify: "Calculate: total accounts processed, validation failures by field, industries represented" |
+| "handle errors gracefully" | Vague error handling | Log to Apex Logs? Custom object? What info? | Specify: "Log errors to Error_Log__c with: record ID, field name, validation rule violated, timestamp" |
+| "comprehensive logging" | Undefined logging depth | What gets logged? When? How detailed? | Specify: "Log batch start/end, records processed per chunk, any skipped records, final counts" |
+| "scalable and performs well" | No performance metrics | How many records? What's "well"? Execution time? Limits? | Specify: "Handle up to 100K records. Complete within 5 minutes. Track governor limit usage" |
+| "best practices" | Training-data generic patterns | What practices? Framework-specific patterns? | Specify: "Use Database.executeBatch with size 200. Implement DML in finish() method. Query in chunks with LIMIT" |
+
+**Why This Matters:**
+
+A model given this "thorough-sounding" prompt will:
+1. Predict the most statistically common Salesforce patterns (generic validation, standard error handling)
+2. Miss your actual business logic entirely
+3. Produce code that looks right but doesn't match requirements
+4. Force you into iterative refinement anyway
+
+**The Real Issue:** The prompt SOUNDS comprehensive. It uses sophisticated language like "intelligently," "robustly," "optimized." But every phrase is a placeholder for undefined decisions. The model must guess what each phrase means.
+
+**Team Exercise Answer:**
+
+A specific version might look like:
+
 ```
-Docker is a containerization platform that... [continue]
+Create a Batch Apex class named AccountDataValidationBatch that processes Account records.
+
+Scope: Process accounts modified in the last 7 days (use LastModifiedDate >= last_7_days).
+Batch size: 200 records per batch.
+
+Validations (log failures to Error_Log__c):
+1. Industry field must not be null
+2. AnnualRevenue must be > 0 if Industry = 'Technology'
+3. Website must be populated if Rating = 'Hot'
+
+Analysis/Metrics (log to Account_Metrics__c after batch completes):
+- Total accounts processed
+- Validation failures count
+- Failures by validation rule
+- Industries represented (breakdown by count)
+
+Error Handling:
+- Catch database exceptions in execute() method
+- Log to Error_Log__c: record ID, field validated, rule violated, error message, timestamp
+- Continue processing; don't stop on single record failure
+
+Logging:
+- Log batch start (timestamp)
+- Log chunk completion (chunk X of Y, X records processed)
+- Log batch finish (total processed, total failed, execution time)
+
+Scheduling: Schedule this batch to run daily at 2 AM UTC.
+Batch size: 200 records.
+Governor limits: Track query count and DML operations in logs.
 ```
 
-**Comparative Analysis:** Question-based prompts require the AI to infer format, tone, length, and style. Pattern-based prompts provide explicit structural guidance, reducing ambiguity and improving prediction accuracy.
+This version eliminates guessing. The model knows exactly what to build.
 
 ---
 
@@ -145,21 +365,47 @@ https://scholar.google.com/citations?user=10HSX90AAAAJ&hl=en
 
 **Question approach:**
 ```
-Please write an apology letter.
+Create test data for a multi-level Salesforce scenario
 ```
 
 **Programming approach:**
 ```
-You are a senior site reliability engineer for CloudFlare.
-You're writing to both customers and engineers.
-Write an apology letter.
+Generate Apex test data using the following specifications:
+
+Parent Records:
+- Create 3 Accounts: name = "TestAccount_[1-3]", Industry = 'Technology', AnnualRevenue = 1000000, BillingCity = 'San Francisco'
+
+Child Records (Contacts):
+- Create 2 Contacts per Account (6 total)
+- Contact names: "TestContact_[A-F]"
+- Email format: "testcontact[a-f]@testdata.com"
+- Phone: "555-0001" through "555-0006"
+- Each Contact linked to appropriate Account
+
+Junction Records (Opportunities via Account Contact Roles):
+- Create 2 Opportunities per Account (6 total): name = "TestOpp_[Account#]_[1-2]", StageName = "Prospecting", Amount = 50000, CloseDate = 90 days out
+- For each Opportunity, create AccountContactRole records:
+  - Role = "Business User" for Contact A of each Account
+  - Role = "Decision Maker" for Contact B of each Account
+  - Set IsPrimary = true for Contact A only
+
+Expected Outcome:
+- 3 Accounts with 2 Contacts each
+- 6 Opportunities (2 per Account)
+- 12 AccountContactRole junction records linking Contacts to Opportunities via Account
+
+Insert all records in order: Accounts → Contacts → Opportunities → AccountContactRoles
+Use try-catch with System.debug for any DML errors
 ```
 
 The programming approach establishes explicit instructions:
-1. Role/persona definition
-2. Output format specification
-3. Audience identification
-4. Task specification
+1. **Hierarchical structure** - What records exist at each level (Accounts → Contacts → Opportunities → Roles)
+2. **Data specifications** - Field values, naming conventions, calculated dates
+3. **Relationship mapping** - Explicit "per Account" and "per Opportunity" multipliers
+4. **Junction logic** - Which Contact maps to which Role on which Opportunity
+5. **Insertion order** - Sequence required to respect foreign keys (parents before children)
+6. **Verification** - Count expectations (3 Accounts, 6 Contacts, 6 Opps, 12 junction records)
+7. **Error handling** - How to log and handle failures during data creation
 
 #### Implications
 
@@ -213,89 +459,58 @@ Old Framework → New Framework
 
 ## Part 4: Bringing It Together with an Example (10 minutes)
 
-### The CloudFlare Apology Email: Comparative Analysis
+### The Salesforce Test Plan: Comparative Analysis
 
 #### Insufficient Prompt
 
 ```
-Write a CloudFlare apology email
+Create a test plan for the Account sync feature
 ```
 
 **Issues:**
-- Persona undefined (sender identity unknown)
-- Context absent (incident details not specified)
-- Format unspecified (length, tone, structure undefined)
-- Audience unidentified (target reader not specified)
+- No definition of what "sync" entails (direction, scope, data types)
+- No specification of which systems sync (Salesforce to what?)
+- No test scope (all fields? certain fields? relationships?)
+- No definition of edge cases or failure modes
+- No specification of testing format or audience
 
-**Result:** Generic, statistically average response
+**Result:** Generic test plan covering common scenarios but missing your actual requirements
 
 #### Comprehensive Prompt
 
 ```
-You are a senior site reliability engineer for CloudFlare.
-You're writing to both customers and engineers who experienced an outage.
-The outage lasted 2 hours on March 15, 2024 at 2:00 PM UTC.
-It affected 20% of our customer base.
-The root cause was a faulty database migration.
-Write an apology email that is:
-- Professional and apologetic
-- Radically transparent about what happened
-- Acknowledges both business and technical impact
-- Includes a brief timeline of events
-- Avoids corporate jargon
-- Keeps under 250 words
+You are a QA lead creating a test plan for our Salesforce-to-Warehouse sync feature.
+Context: Every night at 2 AM UTC, our system syncs Account records from Salesforce to our data warehouse. This is read-only—data flows one direction only. The sync includes Account standard fields (Name, Industry, AnnualRevenue, BillingCity) plus three custom fields: Region__c, PartnerTier__c, and SyncStatus__c.
+
+Test Scope:
+- Full sync on first run (all existing Accounts)
+- Incremental sync on subsequent runs (only changed/new Accounts in past 24 hours)
+- Field mapping correctness (all fields arrive in warehouse with correct values)
+- Null/empty field handling
+- Special characters in text fields (quotes, unicode, line breaks)
+- Large numeric values (AnnualRevenue up to $999,999,999)
+- New Accounts created in Salesforce post-sync start
+- Updated Accounts (field changes detected and reflected)
+- Deleted Accounts (soft delete vs. hard delete behavior)
+- Sync failure scenarios (network timeout, Salesforce API downtime, warehouse connection loss)
+
+Format: Organized as Test Scenarios with steps, expected results, and pass/fail criteria.
+Audience: QA engineers who will execute these tests.
+Keep it to 2-3 pages with clear, executable steps.
 ```
 
 **Improvements:**
-- Specific persona (senior SRE)
-- Detailed context (date, duration, scope, root cause)
-- Clear format requirements (tone, length, content structure)
-- Defined audience (mixed technical and business)
+- Explicit system scope (Salesforce → Warehouse, one-way)
+- Specific field list (standard + custom fields named)
+- Defined test categories (full sync, incremental, validation, edge cases, error handling)
+- Concrete examples (numeric bounds, special character types)
+- Clear format and audience expectations
 
-**Result:** Accurate, contextual response that reflects the specified perspective
+**Result:** Test plan directly aligned with your actual feature requirements, executable without interpretation
 
 #### Specification Impact
 
 Each additional specification reduces prediction ambiguity and improves output accuracy. The difference between generic and specific output derives solely from pattern clarity.
-
-### Activity 4: Prompt Specification Exercise (8 minutes)
-
-**Exercise Structure:**
-
-Starting point:
-```
-Write a bug report
-```
-
-**Required specifications for expansion:**
-- Sender role/identity
-- Output format (structure and components)
-- Tone and style
-- Target audience
-- Contextual information (affected system, reproduction conditions, scope)
-- Output constraints (length, depth)
-
-**Example Expansion:**
-```
-You are a QA engineer reporting a bug to the development team.
-Write a bug report for the search feature that crashes when users search for special characters.
-The bug was found in version 2.3.1 on Windows 11.
-It crashes 100% of the time with any special character (!@#$%).
-Affects customer-facing search page.
-
-Format:
-- Title: [one-line summary]
-- Environment: [where it was found]
-- Steps to reproduce: [numbered list]
-- Expected vs. actual behavior
-- Impact: [business impact]
-- Attachment: [screenshot or video]
-
-Tone: Professional and clear
-Keep it to 1 page
-```
-
-**Learning Objective:** Identify and specify previously implicit dimensions of output requirements.
 
 ---
 
@@ -341,55 +556,3 @@ Specific patterns produce accurate predictions. Vague patterns produce generic p
    - Output format and constraints
 
    Compare ease of thought clarification vs. prompt articulation.
-
----
-
-## Common Questions Instructors Get
-
-### Q: "Can the AI learn about me from conversation history?"
-
-**A:** Most LLMs do not retain information across sessions. Each prompt should contain all necessary context. Assume no prior knowledge of user identity, preferences, or previous interactions.
-
-### Q: "If the AI only predicts, how does it generate novel content?"
-
-**A:** The model combines training data patterns in novel sequences. This is not creative thinking; it is statistical combination of learned patterns. Examples improve output by establishing explicit pattern templates that guide prediction.
-
-### Q: "Is this skill or luck?"
-
-**A:** Vague prompts produce inconsistent results (luck). Specific prompts produce predictable results (skill). The difference is controllability. Prompting is skill-based because instruction clarity determines output quality consistently.
-
-### Q: "Why do different models produce different outputs?"
-
-**A:** Different models have different training data and internal parameters, producing different probability distributions. However, all models respond to clear, specific patterns more consistently than vague patterns. Pattern specificity improves output quality across all models.
-
----
-
-## Materials to Prepare for Teaching
-
-**Required preparation:**
-
-1. **Presentation materials:**
-   - Vague vs. specific prompt comparisons
-   - Corresponding output examples
-   - Pattern specification framework visualization
-   - CloudFlare email example progression
-
-2. **Interactive environment:**
-   - ChatGPT, Claude, or Google Gemini access
-   - Pre-prepared example prompts
-   - Demonstration of iterative refinement
-
-3. **Participant materials:**
-   - Pattern programming summary sheet
-   - Prompt template with specification requirements
-   - Homework assignment sheet
-
-4. **Supplementary resources (optional):**
-   - Catchphrase experiment demonstration
-   - CloudFlare email transformation walkthrough
-
----
-
-## Next Session Preview
-
-Following mastery of fundamental pattern programming principles, the subsequent session addresses persona specification—how to establish role-based perspective to guide prediction from specific expertise domains.
